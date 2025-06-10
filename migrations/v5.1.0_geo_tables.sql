@@ -1,7 +1,7 @@
 -- Migration v5.1.0: Ajout des tables géographiques pour les mairies françaises
 
 -- Table pour les départements français
-CREATE TABLE IF NOT EXISTS departments (
+CREATE TABLE IF NOT EXISTS french_departments (
     id SERIAL PRIMARY KEY,
     code VARCHAR(3) NOT NULL UNIQUE,  -- 01-95, 2A, 2B, 971-978
     name VARCHAR(100) NOT NULL,
@@ -11,12 +11,12 @@ CREATE TABLE IF NOT EXISTS departments (
 );
 
 -- Table pour les communes/mairies
-CREATE TABLE IF NOT EXISTS mairies (
+CREATE TABLE IF NOT EXISTS french_communes (
     id SERIAL PRIMARY KEY,
-    insee_code VARCHAR(5),
+    insee_code VARCHAR(5) UNIQUE,
     name VARCHAR(100) NOT NULL,
     email VARCHAR(255),
-    department_code VARCHAR(3) NOT NULL REFERENCES departments(code),
+    department_code VARCHAR(3) NOT NULL REFERENCES french_departments(code),
     population INTEGER NOT NULL DEFAULT 0,
     postal_codes VARCHAR(20)[], -- Peut avoir plusieurs codes postaux
     latitude DECIMAL(10, 8),
@@ -26,26 +26,26 @@ CREATE TABLE IF NOT EXISTS mairies (
 );
 
 -- Index pour optimiser les requêtes de filtrage
-CREATE INDEX IF NOT EXISTS idx_mairies_department ON mairies(department_code);
-CREATE INDEX IF NOT EXISTS idx_mairies_population ON mairies(population);
-CREATE INDEX IF NOT EXISTS idx_mairies_name ON mairies(name);
-CREATE INDEX IF NOT EXISTS idx_mairies_insee ON mairies(insee_code);
-CREATE INDEX IF NOT EXISTS idx_mairies_email ON mairies(email);
+CREATE INDEX IF NOT EXISTS idx_communes_department ON french_communes(department_code);
+CREATE INDEX IF NOT EXISTS idx_communes_population ON french_communes(population);
+CREATE INDEX IF NOT EXISTS idx_communes_name ON french_communes(name);
+CREATE INDEX IF NOT EXISTS idx_communes_insee ON french_communes(insee_code);
+CREATE INDEX IF NOT EXISTS idx_communes_email ON french_communes(email);
 
 -- Table de liaison pour associer les subscribers aux communes
-CREATE TABLE IF NOT EXISTS subscriber_mairies (
+CREATE TABLE IF NOT EXISTS subscriber_communes (
     subscriber_id INTEGER REFERENCES subscribers(id) ON DELETE CASCADE,
-    mairie_id INTEGER REFERENCES mairies(id) ON DELETE CASCADE,
+    commune_id INTEGER REFERENCES french_communes(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    PRIMARY KEY(subscriber_id, mairie_id)
+    PRIMARY KEY(subscriber_id, commune_id)
 );
 
 -- Index pour optimiser les requêtes de ciblage
-CREATE INDEX IF NOT EXISTS idx_sub_mairies_subscriber ON subscriber_mairies(subscriber_id);
-CREATE INDEX IF NOT EXISTS idx_sub_mairies_mairie ON subscriber_mairies(mairie_id);
+CREATE INDEX IF NOT EXISTS idx_sub_communes_subscriber ON subscriber_communes(subscriber_id);
+CREATE INDEX IF NOT EXISTS idx_sub_communes_commune ON subscriber_communes(commune_id);
 
 -- Insertion des données de base des départements français
-INSERT INTO departments (code, name, region) VALUES
+INSERT INTO french_departments (code, name, region) VALUES
 -- Métropole
 ('01', 'Ain', 'Auvergne-Rhône-Alpes'),
 ('02', 'Aisne', 'Hauts-de-France'),
@@ -161,17 +161,17 @@ SELECT
     s.email,
     s.name,
     s.status,
-    m.id as mairie_id,
-    m.name as mairie_name,
-    m.insee_code,
-    m.population,
-    m.department_code,
+    c.id as commune_id,
+    c.name as commune_name,
+    c.insee_code,
+    c.population,
+    c.department_code,
     d.name as department_name,
     d.region
 FROM subscribers s
-LEFT JOIN subscriber_mairies sm ON s.id = sm.subscriber_id
-LEFT JOIN mairies m ON sm.mairie_id = m.id
-LEFT JOIN departments d ON m.department_code = d.code;
+LEFT JOIN subscriber_communes sc ON s.id = sc.subscriber_id
+LEFT JOIN french_communes c ON sc.commune_id = c.id
+LEFT JOIN french_departments d ON c.department_code = d.code;
 
 -- Fonction pour calculer le nombre de destinataires selon des critères
 CREATE OR REPLACE FUNCTION count_targeting_recipients(
@@ -185,13 +185,13 @@ DECLARE
 BEGIN
     SELECT COUNT(DISTINCT s.id) INTO result
     FROM subscribers s
-    LEFT JOIN subscriber_mairies sm ON s.id = sm.subscriber_id
-    LEFT JOIN mairies m ON sm.mairie_id = m.id
-    LEFT JOIN departments d ON m.department_code = d.code
+    LEFT JOIN subscriber_communes sc ON s.id = sc.subscriber_id
+    LEFT JOIN french_communes c ON sc.commune_id = c.id
+    LEFT JOIN french_departments d ON c.department_code = d.code
     WHERE s.status = 'enabled'
-    AND (dept_codes IS NULL OR m.department_code = ANY(dept_codes))
-    AND (pop_min IS NULL OR m.population >= pop_min)
-    AND (pop_max IS NULL OR m.population <= pop_max)
+    AND (dept_codes IS NULL OR c.department_code = ANY(dept_codes))
+    AND (pop_min IS NULL OR c.population >= pop_min)
+    AND (pop_max IS NULL OR c.population <= pop_max)
     AND (regions IS NULL OR d.region = ANY(regions));
     
     RETURN COALESCE(result, 0);

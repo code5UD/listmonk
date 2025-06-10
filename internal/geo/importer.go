@@ -130,23 +130,23 @@ func (imp *CSVImporter) mapColumns(header []string) map[string]int {
 		
 		// Map various possible column names to standard names
 		switch {
-		case strings.Contains(col, "nom") && strings.Contains(col, "commune"):
+		case col == "nom_commune" || (strings.Contains(col, "nom") && strings.Contains(col, "commune")):
 			columnMap["nom_commune"] = i
-		case strings.Contains(col, "code") && strings.Contains(col, "insee"):
+		case col == "code_insee" || (strings.Contains(col, "code") && strings.Contains(col, "insee")):
 			columnMap["code_insee"] = i
-		case strings.Contains(col, "code") && strings.Contains(col, "departement"):
+		case col == "code_departement" || (strings.Contains(col, "code") && strings.Contains(col, "departement")):
 			columnMap["code_departement"] = i
-		case strings.Contains(col, "population"):
+		case col == "population" || strings.Contains(col, "population"):
 			columnMap["population"] = i
-		case strings.Contains(col, "email") || strings.Contains(col, "mail"):
+		case col == "email" || strings.Contains(col, "email") || strings.Contains(col, "mail"):
 			columnMap["email"] = i
-		case strings.Contains(col, "nom") && strings.Contains(col, "contact"):
+		case col == "nom_contact" || (strings.Contains(col, "nom") && strings.Contains(col, "contact")):
 			columnMap["nom_contact"] = i
-		case strings.Contains(col, "code") && strings.Contains(col, "postal"):
+		case col == "code_postal" || (strings.Contains(col, "code") && strings.Contains(col, "postal")):
 			columnMap["code_postal"] = i
-		case strings.Contains(col, "latitude") || strings.Contains(col, "lat"):
+		case col == "latitude" || strings.Contains(col, "latitude") || strings.Contains(col, "lat"):
 			columnMap["latitude"] = i
-		case strings.Contains(col, "longitude") || strings.Contains(col, "lng") || strings.Contains(col, "lon"):
+		case col == "longitude" || strings.Contains(col, "longitude") || strings.Contains(col, "lng") || strings.Contains(col, "lon"):
 			columnMap["longitude"] = i
 		}
 	}

@@ -296,44 +296,76 @@ func (s *Service) CountTargetingRecipients(filter TargetingFilter) (int, error) 
 	return count, nil
 }
 
-// GetTargetingPreview returns a preview of targeting results
-func (s *Service) GetTargetingPreview(filter TargetingFilter) (*TargetingPreview, error) {
-	count, err := s.CountTargetingRecipients(filter)
-	if err != nil {
-		return nil, err
+// GetTargetedSubscribers returns subscribers matching the targeting criteria
+func (s *Service) GetTargetedSubscribers(filter TargetingFilter) ([]CommuneWithSubscriber, error) {
+	var subscribers []CommuneWithSubscriber
+	var args []interface{}
+	argIndex := 1
+
+	query := `
+		SELECT DISTINCT s.id as subscriber_id, s.email as subscriber_email, 
+		       s.name as subscriber_name, s.status as subscriber_status,
+		       c.id, c.insee_code, c.name, c.department_code, c.population, 
+		       c.postal_codes, c.latitude, c.longitude, c.created_at, c.updated_at,
+		       d.name as department_name, d.region
+		FROM subscribers s
+		INNER JOIN subscriber_communes sc ON s.id = sc.subscriber_id
+		INNER JOIN french_communes c ON sc.commune_id = c.id
+		LEFT JOIN french_departments d ON c.department_code = d.code
+		WHERE s.status = 'enabled'
+	`
+
+	// Add filters
+	if len(filter.DepartmentCodes) > 0 {
+		query += fmt.Sprintf(" AND c.department_code = ANY($%d)", argIndex)
+		args = append(args, pq.Array(filter.DepartmentCodes))
+		argIndex++
 	}
 
-	// Get sample communes (limit to 10 for preview)
-	sampleCommunes, err := s.GetCommunes(filter, 10, 0)
-	if err != nil {
-		return nil, err
+	if filter.PopulationMin != nil {
+		query += fmt.Sprintf(" AND c.population >= $%d", argIndex)
+		args = append(args, *filter.PopulationMin)
+		argIndex++
 	}
 
-	// Get statistics
-	stats, err := s.GetTargetingStats(filter)
-	if err != nil {
-		return nil, err
+	if filter.PopulationMax != nil {
+		query += fmt.Sprintf(" AND c.population <= $%d", argIndex)
+		args = append(args, *filter.PopulationMax)
+		argIndex++
 	}
 
-	// Calculate total population
-	var totalPopulation int64
-	for _, commune := range sampleCommunes {
-		totalPopulation += int64(commune.Population)
+	if len(filter.Regions) > 0 {
+		query += fmt.Sprintf(" AND d.region = ANY($%d)", argIndex)
+		args = append(args, pq.Array(filter.Regions))
+		argIndex++
 	}
 
-	preview := &TargetingPreview{
-		Count:           count,
-		Filters:         filter,
-		SampleCommunes:  sampleCommunes,
-		Statistics:      *stats,
-		EstimatedReach:  count,
-		PopulationTotal: totalPopulation,
+	if len(filter.CommuneNames) > 0 {
+		query += fmt.Sprintf(" AND c.name ILIKE ANY($%d)", argIndex)
+		likePatterns := make([]string, len(filter.CommuneNames))
+		for i, name := range filter.CommuneNames {
+			likePatterns[i] = "%" + name + "%"
+		}
+		args = append(args, pq.Array(likePatterns))
+		argIndex++
 	}
 
-	return preview, nil
+	if len(filter.PostalCodes) > 0 {
+		query += fmt.Sprintf(" AND c.postal_codes && $%d", argIndex)
+		args = append(args, pq.Array(filter.PostalCodes))
+		argIndex++
+	}
+
+	query += " ORDER BY c.name, s.name"
+
+	if err := s.db.Select(&subscribers, query, args...); err != nil {
+		return nil, fmt.Errorf("error fetching targeted subscribers: %w", err)
+	}
+
+	return subscribers, nil
 }
 
-// GetTargetingStats returns statistics for targeting filters
+// GetTargetingStats returns statistics for targeting
 func (s *Service) GetTargetingStats(filter TargetingFilter) (*TargetingStats, error) {
 	stats := &TargetingStats{
 		ByDepartment:      make(map[string]int),
@@ -349,171 +381,269 @@ func (s *Service) GetTargetingStats(filter TargetingFilter) (*TargetingStats, er
 
 	stats.TotalCommunes = len(communes)
 
-	// Calculate statistics
-	var totalPopulation int64
+	// Count subscribers
+	count, err := s.CountTargetingRecipients(filter)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalSubscribers = count
+
+	// Calculate statistics by department and region
+	var totalPop int64
 	for _, commune := range communes {
-		totalPopulation += int64(commune.Population)
-		
-		// Count by department
 		stats.ByDepartment[commune.DepartmentCode]++
-		
-		// Count by region
 		if commune.Region != "" {
 			stats.ByRegion[commune.Region]++
 		}
-		
-		// Count by population range
+		totalPop += int64(commune.Population)
+
+		// Population ranges
 		popRange := getPopulationRange(commune.Population)
 		stats.ByPopulationRange[popRange]++
 	}
 
-	if stats.TotalCommunes > 0 {
-		stats.AveragePopulation = float64(totalPopulation) / float64(stats.TotalCommunes)
+	if len(communes) > 0 {
+		stats.AveragePopulation = float64(totalPop) / float64(len(communes))
 	}
 
-	// Get subscriber count
-	stats.TotalSubscribers, err = s.CountTargetingRecipients(filter)
+	// Get detailed population range stats
+	stats.PopulationRanges = s.getPopulationRangeStats(filter)
+
+	return stats, nil
+}
+
+// GetTargetingPreview returns a preview of targeting results
+func (s *Service) GetTargetingPreview(filter TargetingFilter) (*TargetingPreview, error) {
+	// Get sample communes (limited to 10 for preview)
+	sampleCommunes, err := s.GetCommunes(filter, 10, 0)
 	if err != nil {
 		return nil, err
 	}
 
+	// Get full statistics
+	stats, err := s.GetTargetingStats(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Count total recipients
+	count, err := s.CountTargetingRecipients(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate total population
+	var totalPop int64
+	allCommunes, err := s.GetCommunes(filter, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, commune := range allCommunes {
+		totalPop += int64(commune.Population)
+	}
+
+	preview := &TargetingPreview{
+		Count:           count,
+		Filters:         filter,
+		SampleCommunes:  sampleCommunes,
+		Statistics:      *stats,
+		EstimatedReach:  count,
+		PopulationTotal: totalPop,
+	}
+
+	return preview, nil
+}
+
+// GetDepartmentStats returns statistics by department
+func (s *Service) GetDepartmentStats() (map[string]interface{}, error) {
+	var results []struct {
+		DepartmentCode string `db:"department_code"`
+		DepartmentName string `db:"department_name"`
+		Region         string `db:"region"`
+		CommuneCount   int    `db:"commune_count"`
+		SubscriberCount int   `db:"subscriber_count"`
+		TotalPopulation int64 `db:"total_population"`
+	}
+
+	query := `
+		SELECT 
+			d.code as department_code,
+			d.name as department_name,
+			d.region,
+			COUNT(DISTINCT c.id) as commune_count,
+			COUNT(DISTINCT sc.subscriber_id) as subscriber_count,
+			COALESCE(SUM(c.population), 0) as total_population
+		FROM french_departments d
+		LEFT JOIN french_communes c ON d.code = c.department_code
+		LEFT JOIN subscriber_communes sc ON c.id = sc.commune_id
+		GROUP BY d.code, d.name, d.region
+		ORDER BY d.code
+	`
+
+	if err := s.db.Select(&results, query); err != nil {
+		return nil, fmt.Errorf("error fetching department stats: %w", err)
+	}
+
+	stats := make(map[string]interface{})
+	stats["departments"] = results
+
 	return stats, nil
+}
+
+// GetPopulationRangeStats returns statistics by population ranges
+func (s *Service) GetPopulationRangeStats() ([]PopulationRangeStats, error) {
+	return s.getPopulationRangeStats(TargetingFilter{})
+}
+
+// Helper functions
+
+func (s *Service) getPopulationRangeStats(filter TargetingFilter) []PopulationRangeStats {
+	ranges := []PopulationRangeStats{
+		{Range: "0-500", Min: 0, Max: 500},
+		{Range: "501-1000", Min: 501, Max: 1000},
+		{Range: "1001-2000", Min: 1001, Max: 2000},
+		{Range: "2001-5000", Min: 2001, Max: 5000},
+		{Range: "5001-10000", Min: 5001, Max: 10000},
+		{Range: "10001-20000", Min: 10001, Max: 20000},
+		{Range: "20001-50000", Min: 20001, Max: 50000},
+		{Range: "50001+", Min: 50001, Max: 999999999},
+	}
+
+	for i := range ranges {
+		rangeFilter := filter
+		rangeFilter.PopulationMin = &ranges[i].Min
+		rangeFilter.PopulationMax = &ranges[i].Max
+
+		communes, err := s.GetCommunes(rangeFilter, 0, 0)
+		if err == nil {
+			ranges[i].Count = len(communes)
+		}
+
+		count, err := s.CountTargetingRecipients(rangeFilter)
+		if err == nil {
+			ranges[i].Subscribers = count
+		}
+	}
+
+	return ranges
+}
+
+func getPopulationRange(population int) string {
+	switch {
+	case population <= 500:
+		return "0-500"
+	case population <= 1000:
+		return "501-1000"
+	case population <= 2000:
+		return "1001-2000"
+	case population <= 5000:
+		return "2001-5000"
+	case population <= 10000:
+		return "5001-10000"
+	case population <= 20000:
+		return "10001-20000"
+	case population <= 50000:
+		return "20001-50000"
+	default:
+		return "50001+"
+	}
 }
 
 // GetGeoStats returns general geographic statistics
 func (s *Service) GetGeoStats() (*GeoStats, error) {
 	stats := &GeoStats{}
 
-	// Get basic counts
-	if err := s.db.Get(&stats.TotalDepartments, "SELECT COUNT(*) FROM french_departments"); err != nil {
+	// Count departments
+	var deptCount int
+	err := s.db.Get(&deptCount, "SELECT COUNT(*) FROM french_departments")
+	if err != nil {
 		return nil, fmt.Errorf("error counting departments: %w", err)
 	}
+	stats.TotalDepartments = deptCount
 
-	if err := s.db.Get(&stats.TotalCommunes, "SELECT COUNT(*) FROM french_communes"); err != nil {
+	// Count communes
+	var communeCount int
+	err = s.db.Get(&communeCount, "SELECT COUNT(*) FROM french_communes")
+	if err != nil {
 		return nil, fmt.Errorf("error counting communes: %w", err)
 	}
+	stats.TotalCommunes = communeCount
 
-	if err := s.db.Get(&stats.TotalSubscribers, "SELECT COUNT(*) FROM subscribers WHERE status = 'enabled'"); err != nil {
+	// Count subscribers
+	var subCount int
+	err = s.db.Get(&subCount, "SELECT COUNT(DISTINCT subscriber_id) FROM subscriber_communes")
+	if err != nil {
 		return nil, fmt.Errorf("error counting subscribers: %w", err)
 	}
+	stats.TotalSubscribers = subCount
 
-	// Get communes with subscribers
-	query := `
-		SELECT COUNT(DISTINCT c.id)
-		FROM french_communes c
-		INNER JOIN subscriber_communes sc ON c.id = sc.commune_id
-		INNER JOIN subscribers s ON sc.subscriber_id = s.id
-		WHERE s.status = 'enabled'
-	`
-	if err := s.db.Get(&stats.CommunesWithSubscribers, query); err != nil {
+	// Count communes with subscribers
+	var communesWithSubs int
+	err = s.db.Get(&communesWithSubs, "SELECT COUNT(DISTINCT commune_id) FROM subscriber_communes")
+	if err != nil {
 		return nil, fmt.Errorf("error counting communes with subscribers: %w", err)
 	}
+	stats.CommunesWithSubscribers = communesWithSubs
 
 	// Calculate coverage percentage
 	if stats.TotalCommunes > 0 {
 		stats.CoveragePercentage = float64(stats.CommunesWithSubscribers) / float64(stats.TotalCommunes) * 100
 	}
 
-	// Get population statistics
-	query = `
-		SELECT 
-			COALESCE(SUM(population), 0) as total_population,
-			COALESCE(AVG(population), 0) as average_population
-		FROM french_communes
-	`
-	var avgPop sql.NullFloat64
-	if err := s.db.QueryRow(query).Scan(&stats.TotalPopulation, &avgPop); err != nil {
-		return nil, fmt.Errorf("error getting population stats: %w", err)
+	// Population statistics
+	var totalPop, avgPop sql.NullInt64
+	err = s.db.QueryRow("SELECT SUM(population), AVG(population) FROM french_communes").Scan(&totalPop, &avgPop)
+	if err != nil {
+		return nil, fmt.Errorf("error calculating population stats: %w", err)
+	}
+
+	if totalPop.Valid {
+		stats.TotalPopulation = totalPop.Int64
 	}
 	if avgPop.Valid {
-		stats.AveragePopulation = avgPop.Float64
+		stats.AveragePopulation = float64(avgPop.Int64)
 	}
 
-	// Get median population
-	query = `
-		SELECT population 
-		FROM french_communes 
-		ORDER BY population 
-		OFFSET (SELECT COUNT(*) FROM french_communes) / 2 
-		LIMIT 1
-	`
-	if err := s.db.Get(&stats.MedianPopulation, query); err != nil {
-		// If no median found, set to 0
-		stats.MedianPopulation = 0
-	}
-
-	// Get regional statistics
-	query = `
+	// Regional breakdown
+	var regionStats []RegionStat
+	regionQuery := `
 		SELECT 
 			d.region,
-			COUNT(DISTINCT d.id) as departments,
+			COUNT(DISTINCT d.code) as departments,
 			COUNT(DISTINCT c.id) as communes,
-			COUNT(DISTINCT s.id) as subscribers,
+			COUNT(DISTINCT sc.subscriber_id) as subscribers,
 			COALESCE(SUM(c.population), 0) as total_population
 		FROM french_departments d
 		LEFT JOIN french_communes c ON d.code = c.department_code
 		LEFT JOIN subscriber_communes sc ON c.id = sc.commune_id
-		LEFT JOIN subscribers s ON sc.subscriber_id = s.id AND s.status = 'enabled'
 		GROUP BY d.region
 		ORDER BY d.region
 	`
-	
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("error getting regional stats: %w", err)
-	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var regionStat RegionStat
-		if err := rows.Scan(&regionStat.Region, &regionStat.Departments, 
-			&regionStat.Communes, &regionStat.Subscribers, &regionStat.TotalPopulation); err != nil {
-			return nil, fmt.Errorf("error scanning regional stat: %w", err)
-		}
-		
-		// Calculate coverage percentage for this region
-		if regionStat.Communes > 0 {
-			// Count communes with subscribers in this region
-			var communesWithSubs int
-			subQuery := `
-				SELECT COUNT(DISTINCT c.id)
+	err = s.db.Select(&regionStats, regionQuery)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching region stats: %w", err)
+	}
+
+	// Calculate coverage percentage for each region
+	for i := range regionStats {
+		if regionStats[i].Communes > 0 {
+			communesWithSubsInRegion := 0
+			err = s.db.Get(&communesWithSubsInRegion, `
+				SELECT COUNT(DISTINCT c.id) 
 				FROM french_communes c
 				INNER JOIN french_departments d ON c.department_code = d.code
 				INNER JOIN subscriber_communes sc ON c.id = sc.commune_id
-				INNER JOIN subscribers s ON sc.subscriber_id = s.id
-				WHERE d.region = $1 AND s.status = 'enabled'
-			`
-			if err := s.db.Get(&communesWithSubs, subQuery, regionStat.Region); err == nil {
-				regionStat.CoveragePercent = float64(communesWithSubs) / float64(regionStat.Communes) * 100
+				WHERE d.region = $1
+			`, regionStats[i].Region)
+			if err == nil {
+				regionStats[i].CoveragePercent = float64(communesWithSubsInRegion) / float64(regionStats[i].Communes) * 100
 			}
 		}
-		
-		stats.RegionStats = append(stats.RegionStats, regionStat)
 	}
+
+	stats.RegionStats = regionStats
 
 	return stats, nil
-}
-
-// getPopulationRange returns a string representation of the population range
-func getPopulationRange(population int) string {
-	switch {
-	case population < 500:
-		return "< 500"
-	case population < 1000:
-		return "500-999"
-	case population < 2000:
-		return "1000-1999"
-	case population < 5000:
-		return "2000-4999"
-	case population < 10000:
-		return "5000-9999"
-	case population < 20000:
-		return "10000-19999"
-	case population < 50000:
-		return "20000-49999"
-	case population < 100000:
-		return "50000-99999"
-	default:
-		return "100000+"
-	}
 }
