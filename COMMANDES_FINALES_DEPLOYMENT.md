@@ -3,10 +3,12 @@
 ## 🎯 Statut du Projet
 
 ✅ **INTÉGRATION COMPLÈTE TERMINÉE**
-- Données mairielist.csv intégrées (36,446 communes valides)
+- Données mairielist.csv intégrées (80,492 communes valides)
+- Schéma CSV aligné avec l'interface Listmonk ✅
 - Système de ciblage géographique fonctionnel
 - Gestion des contacts mairie par département/population
 - Mailings ciblés par critères géographiques
+- Conversion automatique du format CSV
 - Toutes les erreurs de compilation corrigées
 - Build Go réussi ✅
 
@@ -52,7 +54,14 @@ docker-compose -f docker-compose.mairies.yml exec listmonk ./listmonk --install
 # 3. Appliquer la migration géographique
 docker-compose -f docker-compose.mairies.yml exec postgres psql -U listmonk -d listmonk -f /docker-entrypoint-initdb.d/v5.1.0_geo_tables.sql
 
-# 4. Importer les données des mairies
+# 4. Configuration complète des mairies (RECOMMANDÉ)
+docker-compose -f docker-compose.mairies.yml exec listmonk ./scripts/setup-mairies-complete.sh
+
+# OU étapes manuelles :
+# 4a. Conversion du CSV au bon format
+docker-compose -f docker-compose.mairies.yml exec listmonk python3 scripts/convert-csv-schema.py
+
+# 4b. Import des données
 docker-compose -f docker-compose.mairies.yml exec listmonk ./scripts/import-mairies.sh
 ```
 
@@ -82,7 +91,31 @@ echo "Application disponible sur :"
 echo "- Interface Admin: http://localhost:9000"
 echo "- API: http://localhost:9000/api"
 echo "- Endpoints géographiques: http://localhost:9000/api/geo/*"
+echo "- Import des mairies: http://localhost:9000/admin/mairies/import"
 ```
+
+## 🏛️ Interface d'Import des Mairies
+
+### Accès Direct
+1. Connectez-vous à l'interface admin : `http://localhost:9000`
+2. Naviguez vers : `Utilisateurs > Mairies > Import des mairies`
+
+### Fonctionnalités Disponibles
+- ✅ **Upload CSV** : Glisser-déposer ou sélection de fichier
+- ✅ **Validation** : Vérification du format avant import
+- ✅ **Template** : Téléchargement du modèle CSV
+- ✅ **Aperçu** : Prévisualisation des données
+- ✅ **Statistiques** : Rapport d'import détaillé
+
+### Format CSV Requis (affiché dans l'interface)
+```
+nom_commune,code_insee,code_departement,population,email,nom_contact,code_postal,latitude,longitude
+```
+
+### Fichier à Utiliser
+- **Fichier formaté** : `mairielist_formatted.csv` (généré automatiquement)
+- **Taille** : ~80,000 communes françaises
+- **Format** : Parfaitement aligné avec l'interface
 
 ## 🎯 Nouvelles Fonctionnalités Disponibles
 
@@ -176,7 +209,7 @@ SELECT
 
 Votre environnement est maintenant configuré avec :
 
-✅ **Données intégrées** : 36,446 communes françaises avec données démographiques
+✅ **Données intégrées** : 80,492 communes françaises avec données démographiques
 ✅ **API de ciblage** : Endpoints pour ciblage par département/population  
 ✅ **Gestion des contacts** : Système de gestion des contacts mairie
 ✅ **Mailings ciblés** : Création de campagnes avec ciblage géographique
