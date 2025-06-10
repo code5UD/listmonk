@@ -48,7 +48,7 @@ func main() {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.Comma = ';'
+	reader.Comma = ','
 	reader.LazyQuotes = true
 
 	// Lecture de l'en-tête
