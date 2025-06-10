@@ -38,8 +38,32 @@ check_prerequisites() {
     
     # Vérifier que nous sommes dans le bon répertoire
     if [ ! -f "./listmonk" ]; then
-        log_error "Exécutable listmonk non trouvé. Assurez-vous d'être dans le bon répertoire."
-        exit 1
+        log_error "Exécutable listmonk non trouvé."
+        log_info "Listmonk n'est pas encore configuré sur ce système."
+        echo ""
+        echo "Voulez-vous exécuter la configuration automatique ? (y/N)"
+        read -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Lancement de la configuration automatique..."
+            if [ -f "./setup-listmonk.sh" ]; then
+                ./setup-listmonk.sh
+                if [ ! -f "./listmonk" ]; then
+                    log_error "La configuration a échoué"
+                    exit 1
+                fi
+            else
+                log_error "Script de configuration non trouvé"
+                log_info "Veuillez télécharger et exécuter setup-listmonk.sh"
+                exit 1
+            fi
+        else
+            log_error "Configuration annulée"
+            log_info "Pour configurer Listmonk manuellement :"
+            log_info "  1. Exécutez ./setup-listmonk.sh"
+            log_info "  2. Ou téléchargez Listmonk depuis https://github.com/knadh/listmonk/releases"
+            exit 1
+        fi
     fi
     
     # Vérifier la configuration
