@@ -34,17 +34,17 @@ services:
       LISTMONK_db__password: *db-password
       LISTMONK_db__database: *db-name
       LISTMONK_db__host: listmonk_mairies_db
-      LISTMONK_db__port: 5432
+      LISTMONK_db__port: "5432"
       LISTMONK_db__ssl_mode: disable
-      LISTMONK_db__max_open: 25
-      LISTMONK_db__max_idle: 25
+      LISTMONK_db__max_open: "25"
+      LISTMONK_db__max_idle: "25"
       LISTMONK_db__max_lifetime: 300s
       
       # Redis settings for caching
       LISTMONK_redis__host: listmonk_mairies_redis
-      LISTMONK_redis__port: 6379
+      LISTMONK_redis__port: "6379"
       LISTMONK_redis__password: ""
-      LISTMONK_redis__db: 0
+      LISTMONK_redis__db: "0"
       
       # Timezone
       TZ: Europe/Paris
@@ -54,8 +54,8 @@ services:
       LISTMONK_ADMIN_PASSWORD: ${LISTMONK_ADMIN_PASSWORD:-}
       
       # Geographic features
-      LISTMONK_geo__enabled: true
-      LISTMONK_geo__cache_ttl: 3600
+      LISTMONK_geo__enabled: "true"
+      LISTMONK_geo__cache_ttl: "3600"
       
     volumes:
       - ./uploads:/listmonk/uploads:rw
