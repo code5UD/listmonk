@@ -126,161 +126,146 @@ prepare_csv() {
     fi
 }
 
-# Copier le fichier CSV dans le conteneur
-copy_csv_to_container() {
-    log_info "Copie du fichier CSV dans le conteneur..."
-    
-    # Copier le fichier dans le conteneur
-    if docker cp mairielist-converted.csv "$CONTAINER_NAME:/tmp/mairies.csv"; then
-        log_success "Fichier CSV copié dans le conteneur"
-    else
-        log_error "Échec de la copie du fichier CSV"
-        exit 1
-    fi
-}
+# Note: Nous n'avons plus besoin de copier le fichier dans le conteneur
+# car nous utilisons curl directement depuis l'hôte
 
 # Importer les données via l'API
 import_data_via_api() {
     log_info "Import des données des mairies via l'API..."
     
-    # Créer un script Python temporaire pour l'import
-    cat > /tmp/import_mairies.py << 'EOF'
-#!/usr/bin/env python3
-import requests
-import sys
-import time
-
-def import_mairies():
-    base_url = "http://localhost:9000"
-    api_url = f"{base_url}/api"
+    # Authentification et récupération du token
+    log_info "🔐 Authentification..."
     
-    # Authentification
-    session = requests.Session()
-    login_data = {"username": "admin", "password": "listmonk"}
+    # Obtenir un cookie de session
+    cookie_jar=$(mktemp)
     
-    print("🔐 Authentification...")
-    response = session.post(f"{api_url}/auth/login", json=login_data)
-    if response.status_code != 200:
-        print(f"❌ Échec de l'authentification: {response.status_code}")
-        return False
+    # Login pour obtenir la session
+    login_response=$(curl -s -c "$cookie_jar" -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"listmonk"}' \
+        "$API_URL/auth/login")
     
-    print("✅ Authentification réussie")
-    
-    # Import du fichier CSV
-    print("📤 Import du fichier CSV...")
-    try:
-        with open('/tmp/mairies.csv', 'rb') as f:
-            files = {'file': ('mairies.csv', f, 'text/csv')}
-            data = {
-                'create_subscribers': 'true',
-                'update_existing': 'true'
-            }
-            
-            response = session.post(
-                f"{api_url}/geo/import",
-                files=files,
-                data=data,
-                timeout=300
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                print(f"✅ Import réussi !")
-                data = result.get('data', {})
-                print(f"   - Enregistrements traités : {data.get('total_records', 'N/A')}")
-                print(f"   - Enregistrements importés : {data.get('imported_records', 'N/A')}")
-                print(f"   - Erreurs : {data.get('error_records', 'N/A')}")
-                return True
-            else:
-                print(f"❌ Échec de l'import : {response.status_code}")
-                print(f"   Réponse : {response.text}")
-                return False
-                
-    except Exception as e:
-        print(f"❌ Erreur lors de l'import : {e}")
-        return False
-
-if __name__ == "__main__":
-    if import_mairies():
-        sys.exit(0)
-    else:
-        sys.exit(1)
-EOF
-
-    # Copier le script dans le conteneur et l'exécuter
-    docker cp /tmp/import_mairies.py "$CONTAINER_NAME:/tmp/import_mairies.py"
-    
-    if docker exec "$CONTAINER_NAME" python3 /tmp/import_mairies.py; then
-        log_success "Données des mairies importées avec succès"
+    if [ $? -eq 0 ]; then
+        log_success "Authentification réussie"
     else
-        log_error "Échec de l'import des données"
+        log_error "Échec de l'authentification"
+        rm -f "$cookie_jar"
         return 1
     fi
     
-    # Nettoyer les fichiers temporaires
-    docker exec "$CONTAINER_NAME" rm -f /tmp/mairies.csv /tmp/import_mairies.py
-    rm -f /tmp/import_mairies.py
+    # Import du fichier CSV via l'API standard de Listmonk
+    log_info "📤 Import du fichier CSV via l'API subscribers..."
+    
+    # Utiliser l'endpoint standard d'import de Listmonk
+    import_response=$(curl -s -b "$cookie_jar" -X POST \
+        -F "file=@mairielist-converted.csv" \
+        -F "mode=subscribe" \
+        -F "delim=," \
+        -F "lists=[]" \
+        "$API_URL/import/subscribers")
+    
+    if [ $? -eq 0 ]; then
+        # Vérifier la réponse
+        if echo "$import_response" | grep -q '"status":"success"'; then
+            log_success "Import du CSV lancé avec succès"
+            
+            # Attendre que l'import se termine
+            log_info "⏳ Attente de la fin de l'import..."
+            sleep 5
+            
+            # Vérifier le statut de l'import
+            for i in {1..30}; do
+                status_response=$(curl -s -b "$cookie_jar" "$API_URL/import/subscribers")
+                if echo "$status_response" | grep -q '"status":"finished"'; then
+                    log_success "Import terminé avec succès"
+                    
+                    # Extraire les statistiques si disponibles
+                    if echo "$status_response" | grep -q '"imported"'; then
+                        imported=$(echo "$status_response" | grep -o '"imported":[0-9]*' | cut -d: -f2)
+                        log_success "Enregistrements importés : $imported"
+                    fi
+                    break
+                elif echo "$status_response" | grep -q '"status":"failed"'; then
+                    log_error "L'import a échoué"
+                    echo "Réponse : $status_response"
+                    rm -f "$cookie_jar"
+                    return 1
+                else
+                    log_info "Import en cours... (tentative $i/30)"
+                    sleep 10
+                fi
+            done
+            
+        else
+            log_error "Échec du lancement de l'import"
+            echo "Réponse : $import_response"
+            rm -f "$cookie_jar"
+            return 1
+        fi
+    else
+        log_error "Erreur lors de l'appel à l'API d'import"
+        rm -f "$cookie_jar"
+        return 1
+    fi
+    
+    # Nettoyer
+    rm -f "$cookie_jar"
+    
+    log_success "Import des données terminé"
 }
 
 # Vérifier l'intégration
 verify_integration() {
     log_info "Vérification de l'intégration..."
     
-    # Créer un script de vérification
-    cat > /tmp/verify_integration.py << 'EOF'
-#!/usr/bin/env python3
-import requests
-import sys
-
-def verify():
-    base_url = "http://localhost:9000"
-    api_url = f"{base_url}/api"
-    
-    session = requests.Session()
-    login_data = {"username": "admin", "password": "listmonk"}
-    
     # Authentification
-    response = session.post(f"{api_url}/auth/login", json=login_data)
-    if response.status_code != 200:
-        print("❌ Échec de l'authentification")
-        return False
+    cookie_jar=$(mktemp)
+    
+    login_response=$(curl -s -c "$cookie_jar" -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"listmonk"}' \
+        "$API_URL/auth/login")
+    
+    if [ $? -ne 0 ]; then
+        log_error "Échec de l'authentification pour la vérification"
+        rm -f "$cookie_jar"
+        return 1
+    fi
     
     # Vérifier les abonnés
-    response = session.get(f"{api_url}/subscribers?per_page=1")
-    if response.status_code == 200:
-        data = response.json().get('data', {})
-        total = data.get('total', 0)
-        print(f"✅ Total des abonnés : {total}")
-        
-        if total > 0:
-            print("✅ Intégration réussie !")
-            return True
-        else:
-            print("⚠️  Aucun abonné trouvé")
-            return False
-    else:
-        print(f"❌ Erreur lors de la vérification : {response.status_code}")
-        return False
-
-if __name__ == "__main__":
-    if verify():
-        sys.exit(0)
-    else:
-        sys.exit(1)
-EOF
-
-    # Exécuter la vérification
-    docker cp /tmp/verify_integration.py "$CONTAINER_NAME:/tmp/verify_integration.py"
+    subscribers_response=$(curl -s -b "$cookie_jar" "$API_URL/subscribers?per_page=1")
     
-    if docker exec "$CONTAINER_NAME" python3 /tmp/verify_integration.py; then
-        log_success "Vérification réussie"
+    if [ $? -eq 0 ]; then
+        # Extraire le nombre total d'abonnés
+        total=$(echo "$subscribers_response" | grep -o '"total":[0-9]*' | cut -d: -f2)
+        
+        if [ -n "$total" ] && [ "$total" -gt 0 ]; then
+            log_success "Total des abonnés : $total"
+            
+            if [ "$total" -gt 1000 ]; then
+                log_success "Intégration réussie ! Plus de 1000 abonnés trouvés"
+            else
+                log_warning "Seulement $total abonnés trouvés (attendu: 40000+)"
+            fi
+        else
+            log_warning "Aucun abonné trouvé ou erreur dans la réponse"
+            echo "Réponse API : $subscribers_response"
+        fi
     else
-        log_warning "Problème lors de la vérification"
+        log_error "Erreur lors de la vérification des abonnés"
+    fi
+    
+    # Vérifier quelques abonnés récents
+    recent_response=$(curl -s -b "$cookie_jar" "$API_URL/subscribers?order_by=created_at&order=desc&per_page=3")
+    if [ $? -eq 0 ] && echo "$recent_response" | grep -q '"email"'; then
+        log_info "Derniers abonnés importés :"
+        echo "$recent_response" | grep -o '"email":"[^"]*"' | head -3 | sed 's/"email":"//g' | sed 's/"//g' | sed 's/^/   - /'
     fi
     
     # Nettoyer
-    docker exec "$CONTAINER_NAME" rm -f /tmp/verify_integration.py
-    rm -f /tmp/verify_integration.py
+    rm -f "$cookie_jar"
+    
+    log_success "Vérification terminée"
 }
 
 # Afficher les informations finales
@@ -337,7 +322,6 @@ main() {
     check_containers
     check_listmonk_access
     prepare_csv
-    copy_csv_to_container
     import_data_via_api
     verify_integration
     show_final_info
