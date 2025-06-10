@@ -50,6 +50,29 @@ type TargetingFilter struct {
 	Regions         []string `json:"regions,omitempty"`
 	CommuneNames    []string `json:"commune_names,omitempty"`
 	PostalCodes     []string `json:"postal_codes,omitempty"`
+	
+	// Advanced filtering with AND/OR operators
+	AdvancedFilters *AdvancedTargetingFilter `json:"advanced_filters,omitempty"`
+}
+
+// AdvancedTargetingFilter represents complex filtering with AND/OR logic
+type AdvancedTargetingFilter struct {
+	Operator string                    `json:"operator"` // "AND" or "OR"
+	Rules    []TargetingRule          `json:"rules"`
+	Groups   []AdvancedTargetingFilter `json:"groups,omitempty"`
+}
+
+// TargetingRule represents a single targeting rule
+type TargetingRule struct {
+	Field    string      `json:"field"`    // "department", "population", "region", "commune_name", "postal_code"
+	Operator string      `json:"operator"` // "eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in", "contains", "not_contains"
+	Value    interface{} `json:"value"`
+}
+
+// PopulationRange represents a population range filter
+type PopulationRange struct {
+	Min *int `json:"min,omitempty"`
+	Max *int `json:"max,omitempty"`
 }
 
 // TargetingStats represents statistics for geographic targeting

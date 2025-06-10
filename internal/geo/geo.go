@@ -49,9 +49,6 @@ func (s *Service) GetDepartmentByCode(code string) (*Department, error) {
 // GetCommunes returns communes with optional filtering
 func (s *Service) GetCommunes(filter TargetingFilter, limit, offset int) ([]Commune, error) {
 	var communes []Commune
-	var args []interface{}
-	var conditions []string
-	argIndex := 1
 
 	query := `
 		SELECT c.id, c.insee_code, c.name, c.department_code, c.population, 
@@ -61,53 +58,21 @@ func (s *Service) GetCommunes(filter TargetingFilter, limit, offset int) ([]Comm
 		LEFT JOIN french_departments d ON c.department_code = d.code
 	`
 
-	// Build WHERE conditions
-	if len(filter.DepartmentCodes) > 0 {
-		conditions = append(conditions, fmt.Sprintf("c.department_code = ANY($%d)", argIndex))
-		args = append(args, pq.Array(filter.DepartmentCodes))
-		argIndex++
+	// Build WHERE conditions using the query builder
+	qb := NewQueryBuilder()
+	whereClause, args, err := qb.BuildAdvancedQuery(filter)
+	if err != nil {
+		return nil, fmt.Errorf("error building query: %w", err)
 	}
 
-	if filter.PopulationMin != nil {
-		conditions = append(conditions, fmt.Sprintf("c.population >= $%d", argIndex))
-		args = append(args, *filter.PopulationMin)
-		argIndex++
-	}
-
-	if filter.PopulationMax != nil {
-		conditions = append(conditions, fmt.Sprintf("c.population <= $%d", argIndex))
-		args = append(args, *filter.PopulationMax)
-		argIndex++
-	}
-
-	if len(filter.Regions) > 0 {
-		conditions = append(conditions, fmt.Sprintf("d.region = ANY($%d)", argIndex))
-		args = append(args, pq.Array(filter.Regions))
-		argIndex++
-	}
-
-	if len(filter.CommuneNames) > 0 {
-		nameConditions := make([]string, len(filter.CommuneNames))
-		for i, name := range filter.CommuneNames {
-			nameConditions[i] = fmt.Sprintf("c.name ILIKE $%d", argIndex)
-			args = append(args, "%"+name+"%")
-			argIndex++
-		}
-		conditions = append(conditions, "("+strings.Join(nameConditions, " OR ")+")")
-	}
-
-	if len(filter.PostalCodes) > 0 {
-		conditions = append(conditions, fmt.Sprintf("c.postal_codes && $%d", argIndex))
-		args = append(args, pq.Array(filter.PostalCodes))
-		argIndex++
-	}
-
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+	if whereClause != "" {
+		query += " WHERE " + whereClause
 	}
 
 	query += " ORDER BY c.name"
 
+	// Add pagination
+	argIndex := len(args) + 1
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argIndex)
 		args = append(args, limit)
@@ -247,9 +212,6 @@ func (s *Service) GetSubscriberCommunes(subscriberID int) ([]Commune, error) {
 // CountTargetingRecipients counts the number of subscribers matching the targeting criteria
 func (s *Service) CountTargetingRecipients(filter TargetingFilter) (int, error) {
 	var count int
-	var args []interface{}
-	var conditions []string
-	argIndex := 1
 
 	query := `
 		SELECT COUNT(DISTINCT s.id)
@@ -260,33 +222,15 @@ func (s *Service) CountTargetingRecipients(filter TargetingFilter) (int, error) 
 		WHERE s.status = 'enabled'
 	`
 
-	// Build WHERE conditions
-	if len(filter.DepartmentCodes) > 0 {
-		conditions = append(conditions, fmt.Sprintf("c.department_code = ANY($%d)", argIndex))
-		args = append(args, pq.Array(filter.DepartmentCodes))
-		argIndex++
+	// Build WHERE conditions using the query builder
+	qb := NewQueryBuilder()
+	whereClause, args, err := qb.BuildAdvancedQuery(filter)
+	if err != nil {
+		return 0, fmt.Errorf("error building query: %w", err)
 	}
 
-	if filter.PopulationMin != nil {
-		conditions = append(conditions, fmt.Sprintf("c.population >= $%d", argIndex))
-		args = append(args, *filter.PopulationMin)
-		argIndex++
-	}
-
-	if filter.PopulationMax != nil {
-		conditions = append(conditions, fmt.Sprintf("c.population <= $%d", argIndex))
-		args = append(args, *filter.PopulationMax)
-		argIndex++
-	}
-
-	if len(filter.Regions) > 0 {
-		conditions = append(conditions, fmt.Sprintf("d.region = ANY($%d)", argIndex))
-		args = append(args, pq.Array(filter.Regions))
-		argIndex++
-	}
-
-	if len(conditions) > 0 {
-		query += " AND " + strings.Join(conditions, " AND ")
+	if whereClause != "" {
+		query += " AND " + whereClause
 	}
 
 	if err := s.db.Get(&count, query, args...); err != nil {
@@ -299,8 +243,6 @@ func (s *Service) CountTargetingRecipients(filter TargetingFilter) (int, error) 
 // GetTargetedSubscribers returns subscribers matching the targeting criteria
 func (s *Service) GetTargetedSubscribers(filter TargetingFilter) ([]CommuneWithSubscriber, error) {
 	var subscribers []CommuneWithSubscriber
-	var args []interface{}
-	argIndex := 1
 
 	query := `
 		SELECT DISTINCT s.id as subscriber_id, s.email as subscriber_email, 
@@ -315,45 +257,15 @@ func (s *Service) GetTargetedSubscribers(filter TargetingFilter) ([]CommuneWithS
 		WHERE s.status = 'enabled'
 	`
 
-	// Add filters
-	if len(filter.DepartmentCodes) > 0 {
-		query += fmt.Sprintf(" AND c.department_code = ANY($%d)", argIndex)
-		args = append(args, pq.Array(filter.DepartmentCodes))
-		argIndex++
+	// Build WHERE conditions using the query builder
+	qb := NewQueryBuilder()
+	whereClause, args, err := qb.BuildAdvancedQuery(filter)
+	if err != nil {
+		return nil, fmt.Errorf("error building query: %w", err)
 	}
 
-	if filter.PopulationMin != nil {
-		query += fmt.Sprintf(" AND c.population >= $%d", argIndex)
-		args = append(args, *filter.PopulationMin)
-		argIndex++
-	}
-
-	if filter.PopulationMax != nil {
-		query += fmt.Sprintf(" AND c.population <= $%d", argIndex)
-		args = append(args, *filter.PopulationMax)
-		argIndex++
-	}
-
-	if len(filter.Regions) > 0 {
-		query += fmt.Sprintf(" AND d.region = ANY($%d)", argIndex)
-		args = append(args, pq.Array(filter.Regions))
-		argIndex++
-	}
-
-	if len(filter.CommuneNames) > 0 {
-		query += fmt.Sprintf(" AND c.name ILIKE ANY($%d)", argIndex)
-		likePatterns := make([]string, len(filter.CommuneNames))
-		for i, name := range filter.CommuneNames {
-			likePatterns[i] = "%" + name + "%"
-		}
-		args = append(args, pq.Array(likePatterns))
-		argIndex++
-	}
-
-	if len(filter.PostalCodes) > 0 {
-		query += fmt.Sprintf(" AND c.postal_codes && $%d", argIndex)
-		args = append(args, pq.Array(filter.PostalCodes))
-		argIndex++
+	if whereClause != "" {
+		query += " AND " + whereClause
 	}
 
 	query += " ORDER BY c.name, s.name"

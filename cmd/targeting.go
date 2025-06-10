@@ -115,6 +115,73 @@ func (a *App) GetTargetingStats(c echo.Context) error {
 	return c.JSON(http.StatusOK, okResp{stats})
 }
 
+// handleAdvancedTargeting handles advanced targeting with AND/OR operators
+func (a *App) AdvancedTargeting(c echo.Context) error {
+	var req struct {
+		Filter geo.TargetingFilter `json:"filter"`
+		Limit  int                 `json:"limit,omitempty"`
+		Offset int                 `json:"offset,omitempty"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, 
+			fmt.Sprintf("Invalid request: %v", err))
+	}
+
+	// Set default limit if not provided
+	if req.Limit == 0 {
+		req.Limit = 100
+	}
+
+	// Get targeted subscribers
+	subscribers, err := a.geoSvc.GetTargetedSubscribers(req.Filter)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, 
+			fmt.Sprintf("Error getting targeted subscribers: %v", err))
+	}
+
+	// Get statistics
+	stats, err := a.geoSvc.GetTargetingStats(req.Filter)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, 
+			fmt.Sprintf("Error getting targeting stats: %v", err))
+	}
+
+	// Get count
+	count, err := a.geoSvc.CountTargetingRecipients(req.Filter)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, 
+			fmt.Sprintf("Error counting recipients: %v", err))
+	}
+
+	result := map[string]interface{}{
+		"subscribers": subscribers,
+		"statistics":  stats,
+		"total_count": count,
+		"filter":      req.Filter,
+	}
+
+	return c.JSON(http.StatusOK, okResp{result})
+}
+
+// handleTargetingPreview returns a preview of targeting results
+func (a *App) GetTargetingPreview(c echo.Context) error {
+	var filter geo.TargetingFilter
+
+	if err := c.Bind(&filter); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, 
+			fmt.Sprintf("Invalid request: %v", err))
+	}
+
+	preview, err := a.geoSvc.GetTargetingPreview(filter)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, 
+			fmt.Sprintf("Error getting targeting preview: %v", err))
+	}
+
+	return c.JSON(http.StatusOK, okResp{preview})
+}
+
 // handleGetDepartmentStats returns statistics by department
 func (a *App) GetDepartmentStats(c echo.Context) error {
 	stats, err := a.geoSvc.GetDepartmentStats()

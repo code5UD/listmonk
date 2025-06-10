@@ -19,6 +19,10 @@ func (a *App) registerGeoRoutes(g *echo.Group) {
 	g.GET("/targeting/departments", a.GetDepartmentStats)
 	g.GET("/targeting/population-ranges", a.GetPopulationRangeStats)
 	
+	// Advanced targeting with AND/OR operators
+	g.POST("/targeting/advanced", a.AdvancedTargeting)
+	g.POST("/targeting/advanced/preview", a.GetTargetingPreview)
+	
 	// Campaign targeting routes
 	g.POST("/campaigns/targeted", a.CreateTargetedCampaign)
 	
