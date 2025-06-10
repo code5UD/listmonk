@@ -493,7 +493,7 @@ func (s *Service) GetDepartmentStats() (map[string]interface{}, error) {
 
 // GetPopulationRangeStats returns statistics by population ranges
 func (s *Service) GetPopulationRangeStats() ([]PopulationRangeStats, error) {
-	return s.getPopulationRangeStats(TargetingFilter{})
+	return s.getPopulationRangeStats(TargetingFilter{}), nil
 }
 
 // Helper functions

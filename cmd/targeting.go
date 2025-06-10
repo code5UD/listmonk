@@ -4,22 +4,23 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/knadh/listmonk/internal/geo"
+	"github.com/knadh/listmonk/models"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 )
 
 // handleCreateTargetedCampaign creates a campaign with geographic targeting
 func (a *App) CreateTargetedCampaign(c echo.Context) error {
 	var req struct {
-		Name            string                `json:"name" validate:"required"`
-		Subject         string                `json:"subject" validate:"required"`
-		Body            string                `json:"body" validate:"required"`
+		Name            string                `json:"name"`
+		Subject         string                `json:"subject"`
+		Body            string                `json:"body"`
 		TemplateID      int                   `json:"template_id"`
 		ListIDs         []int                 `json:"list_ids"`
 		TargetingFilter geo.TargetingFilter   `json:"targeting_filter"`
-		Type            string                `json:"type" validate:"required"`
+		Type            string                `json:"type"`
 		ContentType     string                `json:"content_type"`
 		Tags            []string              `json:"tags"`
 		Headers         []map[string]string   `json:"headers"`
@@ -29,11 +30,6 @@ func (a *App) CreateTargetedCampaign(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, 
 			fmt.Sprintf("Invalid request: %v", err))
-	}
-
-	if err := a.validator.Struct(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, 
-			fmt.Sprintf("Validation error: %v", err))
 	}
 
 	// Get targeted subscribers
@@ -144,9 +140,9 @@ func (a *App) GetPopulationRangeStats(c echo.Context) error {
 // handleBulkSubscriberUpdate updates multiple subscribers with geographic data
 func (a *App) BulkSubscriberUpdate(c echo.Context) error {
 	var req struct {
-		SubscriberIDs []int               `json:"subscriber_ids" validate:"required"`
+		SubscriberIDs []int               `json:"subscriber_ids"`
 		Filter        geo.TargetingFilter `json:"filter"`
-		Action        string              `json:"action" validate:"required"` // "add_to_list", "remove_from_list", "update_status"
+		Action        string              `json:"action"` // "add_to_list", "remove_from_list", "update_status"
 		ListID        *int                `json:"list_id"`
 		Status        *string             `json:"status"`
 	}
@@ -154,11 +150,6 @@ func (a *App) BulkSubscriberUpdate(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, 
 			fmt.Sprintf("Invalid request: %v", err))
-	}
-
-	if err := a.validator.Struct(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, 
-			fmt.Sprintf("Validation error: %v", err))
 	}
 
 	// Get subscribers based on filter if no specific IDs provided
@@ -194,9 +185,9 @@ func (a *App) BulkSubscriberUpdate(c echo.Context) error {
 
 // Helper functions
 
-func (a *App) createTemporaryList(name string, subscribers []geo.CommuneWithSubscriber) (*List, error) {
+func (a *App) createTemporaryList(name string, subscribers []geo.CommuneWithSubscriber) (*models.List, error) {
 	// Create list
-	list := List{
+	list := models.List{
 		Name:        name,
 		Type:        "private",
 		Description: "Temporary list for geographic targeting",
@@ -291,20 +282,3 @@ func (a *App) performBulkSubscriberAction(action string, subscriberIDs []int, li
 	return result, nil
 }
 
-// parseStringArray parses a comma-separated string into a slice
-func parseStringArray(s string) []string {
-	if s == "" {
-		return nil
-	}
-	
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	
-	return result
-}

@@ -30,6 +30,4 @@ func (a *App) registerGeoRoutes(g *echo.Group) {
 	
 	// Subscriber-commune association routes
 	g.GET("/subscribers/:id/communes", a.GetSubscriberCommunes)
-	g.POST("/subscribers/:id/communes/:commune_id", a.AddSubscriberToCommune)
-	g.DELETE("/subscribers/:id/communes/:commune_id", a.RemoveSubscriberFromCommune)
 }
