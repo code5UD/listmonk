@@ -35,7 +35,7 @@ func NewCSVImporter(db *sqlx.DB, geoSvc *Service) *CSVImporter {
 // ImportMairiesFromCSV imports mairies data from a CSV reader
 func (imp *CSVImporter) ImportMairiesFromCSV(reader io.Reader, createSubscribers bool) (*ImportResult, error) {
 	csvReader := csv.NewReader(reader)
-	csvReader.Comma = ';' // French CSV files often use semicolon
+	csvReader.Comma = ',' // Use comma delimiter for our CSV format
 	csvReader.LazyQuotes = true
 
 	// Read header

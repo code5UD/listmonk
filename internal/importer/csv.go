@@ -43,12 +43,12 @@ func NewCSVImporter(db *sql.DB, geoSvc *geo.Service, logger func(string, ...inte
 
 // GetImportTemplate returns a CSV template with headers and example data
 func (c *CSVImporter) GetImportTemplate() string {
-	template := `nom_commune,code_insee,code_departement,population,email,nom_contact,telephone,adresse,code_postal,latitude,longitude
-Paris,75056,75,2161000,contact@paris.fr,Mairie de Paris,01.42.76.40.40,"Place de l'Hôtel de Ville",75004,48.8566,2.3522
-Lyon,69123,69,515695,contact@lyon.fr,Mairie de Lyon,04.72.10.30.30,"1 Place de la Comédie",69001,45.7640,4.8357
-Marseille,13055,13,861635,contact@marseille.fr,Mairie de Marseille,04.91.55.15.15,"2 Quai du Port",13002,43.2965,5.3698
-Toulouse,31555,31,471941,contact@toulouse.fr,Mairie de Toulouse,05.61.22.29.22,"1 Place du Capitole",31000,43.6047,1.4442
-Nice,06088,06,342637,contact@nice.fr,Mairie de Nice,04.97.13.20.00,"5 Rue de l'Hôtel de ville",06000,43.7102,7.2620`
+	template := `nom_commune,code_insee,code_departement,population,email,nom_contact,code_postal,latitude,longitude
+Paris,75056,75,2161000,contact@paris.fr,M. Anne HIDALGO,75004,48.8566,2.3522
+Lyon,69123,69,515695,contact@lyon.fr,M. Grégory DOUCET,69001,45.7640,4.8357
+Marseille,13055,13,861635,contact@marseille.fr,Mme Michèle RUBIROLA,13002,43.2965,5.3698
+Toulouse,31555,31,471941,contact@toulouse.fr,M. Jean-Luc MOUDENC,31000,43.6047,1.4442
+Nice,06088,06,342637,contact@nice.fr,M. Christian ESTROSI,06000,43.7102,7.2620`
 
 	return template
 }
